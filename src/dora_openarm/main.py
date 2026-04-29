@@ -136,6 +136,19 @@ def main():
                 "position",
                 pa.array(current_position, type=pa.float32()),
             )
+        elif event_id == "request_state":
+            state = arm.fetch_state(refresh=args.refresh_every_request)
+            node.send_output(
+                "state",
+                pa.StructArray.from_arrays(
+                    [
+                        pa.array(state["qpos"], type=pa.float32()),
+                        pa.array(state["qvel"], type=pa.float32()),
+                        pa.array(state["qtorque"], type=pa.float32()),
+                    ],
+                    names=["qpos", "qvel", "qtorque"],
+                ),
+            )
         elif event_id == "move_position":
             value = event["value"]
             if isinstance(value, pa.StructArray):
