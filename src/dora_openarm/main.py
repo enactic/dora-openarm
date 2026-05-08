@@ -76,6 +76,7 @@ def _env_flag(name, default=False):
 def main():
     """Move to the given position and output the current position."""
     parser = argparse.ArgumentParser(description="Control OpenArm")
+    base_dir = os.path.dirname(__file__)
     parser.add_argument(
         "--side",
         choices=["right", "left"],
@@ -84,7 +85,7 @@ def main():
     )
     parser.add_argument(
         "--config",
-        default="openarm_cell.yaml",
+        default=f"{base_dir}/openarm_cell.yaml",
         help="The configuration file for this OpenArm",
         type=pathlib.Path,
     )

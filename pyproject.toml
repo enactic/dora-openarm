@@ -37,6 +37,11 @@ Changelog = "https://github.com/enactic/dora-openarm/releases"
 Issues = "https://github.com/enactic/dora-openarm/issues"
 Repository = "https://github.com/enactic/dora-openarm.git"
 
+[tool.setuptools.package-data]
+"dora_openarm" = [
+    "*.yaml",
+]
+
 [tool.ruff.lint]
 extend-select = [
   "D",   # pydocstyle
