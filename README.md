@@ -26,7 +26,6 @@ nodes:
   - id: follower-left
     build: pip install dora-openarm
     path: dora-openarm
-    # Adjust the arguments to match your setup.
     args: "--side left --align-trigger gripper"
     inputs:
       # Only the event ID is used. The event value is ignored.
