@@ -15,9 +15,9 @@
 name: Package
 on:
   push:
-    branches:
-      - '**'
-      - '!dependabot/**'
+    branches-ignore:
+      - 'dependabot/**'
+      - 'copilot/**'
     tags:
       - '**'
   pull_request:
