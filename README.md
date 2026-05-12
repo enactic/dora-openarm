@@ -16,7 +16,7 @@ nodes:
     path: dora-openarm
     args: "--side right --align-trigger gripper"
     inputs:
-      # Event ID is only used. Event value isn't used.
+      # Only the event ID is used. The event value is ignored.
       request_position: leader/right_follower_position
       move_position: leader/right_follower_position
     outputs:
@@ -30,7 +30,7 @@ nodes:
     # Please configure!
     args: "--side left --align-trigger gripper"
     inputs:
-      # Event ID is only used. Event value isn't used.
+      # Only the event ID is used. The event value is ignored.
       request_position: leader/left_follower_position
       move_position: leader/left_follower_position
     outputs:
