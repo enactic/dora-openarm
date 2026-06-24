@@ -61,7 +61,7 @@ nodes:
 | Output | Description |
 | --- | --- |
 | `position` | Current arm position as a float32 array. |
-| `state` | Current arm state as a struct with float32 array fields `qpos`, `qvel`, and `qtorque`. |
+| `state` | Current arm state as a struct with float32 array fields `qpos`, `qvel`, and `qtorque`, plus int32 array fields `tmos` (MOS temperature) and `trotor` (rotor temperature) per motor, in °C. |
 | `status` | A string array containing `ready` once the initial alignment completes. |
 
 ## License

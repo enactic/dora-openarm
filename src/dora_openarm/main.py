@@ -172,8 +172,10 @@ def main():
                         pa.array(state["qpos"], type=pa.float32()),
                         pa.array(state["qvel"], type=pa.float32()),
                         pa.array(state["qtorque"], type=pa.float32()),
+                        pa.array(state["tmos"], type=pa.int32()),
+                        pa.array(state["trotor"], type=pa.int32()),
                     ],
-                    names=["qpos", "qvel", "qtorque"],
+                    names=["qpos", "qvel", "qtorque", "tmos", "trotor"],
                 ),
             )
         elif event_id == "move_position":
