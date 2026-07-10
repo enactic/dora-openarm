@@ -46,9 +46,9 @@ def _align(arm, state, new_position, name, threshold, trigger=None):
     if trigger == "gripper":  # Check if gripper is active (threshold ~ -10 deg)
         gripper_position = new_position[-1]  # Last value is gripper's position
         if name == "right_arm":
-            is_gripping = gripper_position.as_py() > np.deg2rad(-5)
+            is_gripping = gripper_position > np.deg2rad(-5)
         elif name == "left_arm":
-            is_gripping = gripper_position.as_py() < np.deg2rad(5)
+            is_gripping = gripper_position < np.deg2rad(5)
         if not is_gripping:
             return False
 
@@ -78,6 +78,21 @@ def _env_flag(name, default=False):
     if v is None:
         return default
     return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+QPOS_TYPE = pa.struct([("qpos", pa.list_(pa.float32()))])
+
+
+def qpos_struct(qpos: np.ndarray) -> pa.Array:
+    """Wrap a qpos array as a length-1 StructArray: [{"qpos": [...]}]."""
+    return pa.array([{"qpos": qpos}], type=QPOS_TYPE)
+
+
+def extract_values(value: pa.Array, key: str) -> np.ndarray:
+    """Read `key` from a length-1 StructArray, or a flat array as-is."""
+    if pa.types.is_struct(value.type):
+        value = value.field(key)[0].values
+    return np.array(value, dtype=np.float32)
 
 
 def main():
@@ -171,7 +186,7 @@ def main():
             )
             node.send_output(
                 "position",
-                pa.array(current_position, type=pa.float32()),
+                qpos_struct(np.asarray(current_position, dtype=np.float32)),
             )
         elif event_id == "request_state":
             if status is ArmStatus.STOPPED:
@@ -195,20 +210,22 @@ def main():
                 continue
             value = event["value"]
             if isinstance(value, pa.StructArray):
-                new_position = value.field("new_position")
+                names = {field.name for field in value.type}
+                if "qpos" in names:
+                    new_position = extract_values(value, "qpos")
+                else:
+                    new_position = np.array(
+                        value.field("new_position"), dtype=np.float32
+                    )
                 # TODO: We use this for safety check later.
                 # other_arm_position = value.field("other_arm_position")
             else:
-                new_position = value
+                new_position = np.array(value, dtype=np.float32)
                 # other_arm_position = None
 
             if status is ArmStatus.ALIGNED:
                 diverged = np.any(
-                    np.abs(
-                        np.asarray(new_position, dtype=np.float32)[:-1]
-                        - arm.last_command[:-1]
-                    )
-                    > align_threshold
+                    np.abs(new_position[:-1] - arm.last_command[:-1]) > align_threshold
                 )
                 if diverged:
                     status = ArmStatus.STARTED

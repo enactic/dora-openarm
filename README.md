@@ -54,13 +54,13 @@ nodes:
 | --- | --- |
 | `request_position` | Requests the current arm position. The event ID is used and the event value is ignored. |
 | `request_state` | Requests the current arm state. The event ID is used and the event value is ignored. |
-| `move_position` | Sends a new target position to the arm. The value may be a position array directly, or a struct containing `new_position`. When the node has not been initialized yet, this input first drives the alignment step. |
+| `move_position` | Sends a new target position to the arm. The value may be a struct containing `qpos` (`[{"qpos": [...]}]`), a position array directly, or a legacy struct containing `new_position`. When the node has not been initialized yet, this input first drives the alignment step. |
 
 ### Outputs
 
 | Output | Description |
 | --- | --- |
-| `position` | Current arm position as a float32 array. |
+| `position` | Current arm position as a length-1 struct containing a float32 array: `[{"qpos": [...]}]`. |
 | `state` | Current arm state as a struct with float32 array fields `qpos`, `qvel`, and `qtorque`, plus int32 array fields `tmos` (MOS temperature) and `trotor` (rotor temperature) per motor, in °C. |
 | `status` | A string array containing `ready` once the initial alignment completes. |
 
