@@ -224,7 +224,7 @@ def main():
                 continue
             value = event["value"]
             if isinstance(value, pa.StructArray):
-                names = {field.name for field in value.type}
+                names = value.type.names
                 if "qpos" in names:
                     new_position = extract_values(value, "qpos")
                 else:
