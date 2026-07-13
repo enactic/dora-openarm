@@ -82,10 +82,36 @@ def _env_flag(name, default=False):
 
 QPOS_TYPE = pa.struct([("qpos", pa.list_(pa.float32()))])
 
+STATE_TYPE = pa.struct(
+    [
+        ("qpos", pa.list_(pa.float32())),
+        ("qvel", pa.list_(pa.float32())),
+        ("qtorque", pa.list_(pa.float32())),
+        ("tmos", pa.list_(pa.int32())),
+        ("trotor", pa.list_(pa.int32())),
+    ]
+)
+
 
 def qpos_struct(qpos: np.ndarray) -> pa.Array:
     """Wrap a qpos array as a length-1 StructArray: [{"qpos": [...]}]."""
     return pa.array([{"qpos": qpos}], type=QPOS_TYPE)
+
+
+def state_struct(state) -> pa.Array:
+    """Wrap a state dict as a length-1 StructArray: [{"qpos": [...], ...}]."""
+    return pa.array(
+        [
+            {
+                "qpos": state["qpos"],
+                "qvel": state["qvel"],
+                "qtorque": state["qtorque"],
+                "tmos": state["tmos"],
+                "trotor": state["trotor"],
+            }
+        ],
+        type=STATE_TYPE,
+    )
 
 
 def extract_values(value: pa.Array, key: str) -> np.ndarray:
@@ -192,19 +218,7 @@ def main():
             if status is ArmStatus.STOPPED:
                 continue
             state = arm.fetch_state(refresh=args.refresh_every_request)
-            node.send_output(
-                "state",
-                pa.StructArray.from_arrays(
-                    [
-                        pa.array(state["qpos"], type=pa.float32()),
-                        pa.array(state["qvel"], type=pa.float32()),
-                        pa.array(state["qtorque"], type=pa.float32()),
-                        pa.array(state["tmos"], type=pa.int32()),
-                        pa.array(state["trotor"], type=pa.int32()),
-                    ],
-                    names=["qpos", "qvel", "qtorque", "tmos", "trotor"],
-                ),
-            )
+            node.send_output("state", state_struct(state))
         elif event_id == "move_position":
             if status is ArmStatus.STOPPED:
                 continue
