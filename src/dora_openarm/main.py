@@ -233,7 +233,7 @@ def main():
         if args.stop:
             arm.stop()
         else:
-            arm.on_start()
+            arm.move_to_start_position()
 
 
 if __name__ == "__main__":
