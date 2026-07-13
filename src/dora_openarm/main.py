@@ -93,12 +93,12 @@ STATE_TYPE = pa.struct(
 )
 
 
-def qpos_struct(qpos: np.ndarray) -> pa.Array:
+def build_qpos_output(qpos: np.ndarray) -> pa.Array:
     """Wrap a qpos array as a length-1 StructArray: [{"qpos": [...]}]."""
     return pa.array([{"qpos": qpos}], type=QPOS_TYPE)
 
 
-def state_struct(state) -> pa.Array:
+def build_state_output(state) -> pa.Array:
     """Wrap a state dict as a length-1 StructArray: [{"qpos": [...], ...}]."""
     return pa.array(
         [
@@ -212,13 +212,13 @@ def main():
             )
             node.send_output(
                 "position",
-                qpos_struct(np.asarray(current_position, dtype=np.float32)),
+                build_qpos_output(np.asarray(current_position, dtype=np.float32)),
             )
         elif event_id == "request_state":
             if status is ArmStatus.STOPPED:
                 continue
             state = arm.fetch_state(refresh=args.refresh_every_request)
-            node.send_output("state", state_struct(state))
+            node.send_output("state", build_state_output(state))
         elif event_id == "move_position":
             if status is ArmStatus.STOPPED:
                 continue
