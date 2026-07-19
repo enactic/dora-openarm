@@ -52,17 +52,16 @@ def _align(arm, state, new_position, name, threshold, trigger=None):
         if not is_gripping:
             return False
 
-    def current_position():
-        return np.array(arm.fetch_position(), dtype=np.float32)
+    current_position = np.array(arm.fetch_position(), dtype=np.float32)
 
     if state.align_target is None:
-        state.align_target = current_position()
+        state.align_target = current_position.copy()
 
     def is_aligned(position1, position2):
-        return np.all(np.abs(position1 - position2) < threshold)
+        return np.all(np.abs(position1[:-1] - position2[:-1]) < threshold)
 
     # If OpenArm is already aligned, we do nothing.
-    if is_aligned(new_position, current_position()):
+    if is_aligned(new_position, current_position):
         return True
     diff = new_position - state.align_target
     step_move = np.clip(diff, -state.step_limit, state.step_limit)
@@ -70,7 +69,8 @@ def _align(arm, state, new_position, name, threshold, trigger=None):
 
     arm.send_position(state.align_target)
 
-    return is_aligned(new_position, current_position())
+    # Check the physical position on the next command after the arm has moved.
+    return False
 
 
 def _env_flag(name, default=False):
@@ -149,6 +149,18 @@ def main():
         type=float,
     )
     parser.add_argument(
+        "--align-delta-limit",
+        default=0.001,
+        help="Maximum joint delta per alignment command [rad] (default: 0.001).",
+        type=float,
+    )
+    parser.add_argument(
+        "--align",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Align to incoming position commands after start (default: enabled).",
+    )
+    parser.add_argument(
         "--stop",
         action=argparse.BooleanOptionalAction,
         default=_env_flag("STOP", True),
@@ -167,18 +179,24 @@ def main():
         help="Start the arm on startup.",
     )
     args = parser.parse_args()
+    if args.align_delta_limit <= 0.0:
+        parser.error("--align-delta-limit must be positive")
     node = dora.Node()
     name = f"{args.side}_arm"
     config = openarm_driver.Config(args.config)
     align_threshold = args.align_threshold
     arm = None
+    ready_status = ArmStatus.ALIGNED if args.align else ArmStatus.STARTED
     if args.start_on_startup:
         arm = openarm_driver.SingleArmDriver(name, config)
         arm.start()
-        align_state = AlignState()
+        align_state = (
+            AlignState(step_limit=args.align_delta_limit) if args.align else None
+        )
         status = ArmStatus.STARTED
-        node.send_output("status", pa.array([ArmStatus.STARTED]))
+        node.send_output("status", pa.array([status]))
     else:
+        align_state = None
         status = ArmStatus.STOPPED
         node.send_output("status", pa.array([ArmStatus.STOPPED]))
     for event in node:
@@ -195,15 +213,18 @@ def main():
                     name, config
                 )  # Re-initialize the arm to ensure a fresh start
                 arm.start()
-                align_state = AlignState()
+                align_state = (
+                    AlignState(step_limit=args.align_delta_limit) if args.align else None
+                )
                 status = ArmStatus.STARTED
-                node.send_output("status", pa.array([ArmStatus.STARTED]))
+                node.send_output("status", pa.array([status]))
             elif command == "stop":
                 status = ArmStatus.STOPPED
                 node.send_output("status", pa.array([ArmStatus.STOPPED]))
                 if arm is not None:
                     arm.stop()
                     arm = None  # Drop the instance to free resources
+                align_state = None
         elif event_id == "request_position":
             if status is ArmStatus.STOPPED:
                 continue
@@ -237,18 +258,9 @@ def main():
                 new_position = np.array(value, dtype=np.float32)
                 # other_arm_position = None
 
-            if status is ArmStatus.ALIGNED:
-                diverged = np.any(
-                    np.abs(new_position[:-1] - arm.last_command[:-1]) > align_threshold
-                )
-                if diverged:
-                    status = ArmStatus.STARTED
-                    align_state = AlignState()
-                    node.send_output("status", pa.array([ArmStatus.STARTED]))
-                else:
-                    arm.send_position(new_position)
-
-            if status is ArmStatus.STARTED:
+            if status is ready_status:
+                arm.send_position(new_position)
+            elif status is ArmStatus.STARTED:
                 is_aligned = _align(
                     arm,
                     align_state,
