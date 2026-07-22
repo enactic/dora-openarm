@@ -214,7 +214,9 @@ def main():
                 )  # Re-initialize the arm to ensure a fresh start
                 arm.start()
                 align_state = (
-                    AlignState(step_limit=args.align_delta_limit) if args.align else None
+                    AlignState(step_limit=args.align_delta_limit)
+                    if args.align
+                    else None
                 )
                 status = ArmStatus.STARTED
                 node.send_output("status", pa.array([status]))
@@ -270,6 +272,7 @@ def main():
                     trigger=args.align_trigger,
                 )
                 if is_aligned:
+                    arm.send_position(new_position)
                     status = ArmStatus.ALIGNED
                     node.send_output("status", pa.array([ArmStatus.ALIGNED]))
     if arm is not None:
