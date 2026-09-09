@@ -21,7 +21,11 @@ license = { text = "Apache-2.0" }
 readme = "README.md"
 requires-python = ">=3.10"
 
-dependencies = ["dora-rs >= 0.5.0", "openarm-driver >= 0.2.0"]
+dependencies = [
+  "dora-rs >= 0.5.0, <= 1.0.1",
+  "dora-rs-cli>=0.5.0, <= 1.0.1",
+  "openarm-driver >= 0.2.0",
+]
 
 [dependency-groups]
 dev = [
