@@ -18,11 +18,9 @@ import argparse
 import dataclasses
 import enum
 import dora
-import openarm_can
 import openarm_driver
 import os
 import pathlib
-import time
 import pyarrow as pa
 import numpy as np
 
@@ -121,20 +119,10 @@ STATE_TYPE = pa.struct(
         # One entry per motor, in the same order as qpos: the motor's own
         # status nibble by name, or "SILENT" when it has stopped answering.
         ("motor_status", pa.list_(pa.string())),
-        # Whether the last entry of every per-motor list is the gripper.
-        # Only the driver's config says so, and a consumer that labels the
-        # axes cannot work it out from the lengths alone.
-        ("has_gripper", pa.bool_()),
         ("bus", BUS_TYPE),
     ]
 )
 
-# An axis quiet for longer than this is reported as SILENT. At the rate a
-# leader drives the arm this is many missed replies, not a single one.
-AXIS_SILENT_AFTER_S = 0.5
-
-# is_link_running() costs an ioctl, so it is not read on every request.
-CARRIER_POLL_INTERVAL_S = 0.5
 
 _EMPTY_BUS = {
     "carrier": True,
@@ -167,73 +155,37 @@ def _build_arm(name, config, can_interface):
     return openarm_driver.SingleArmDriver(name, config, can_interface=can_interface)
 
 
-class HealthReader:
-    """Reads openarm_can's bus and per-axis diagnostics, when it has them.
+def _bus_snapshot(bus: dict) -> dict:
+    """Narrow openarm_driver's get_health() bus dict to what `state` publishes.
 
-    Reports; it never decides that a fault means stop. The diagnostics are
-    newer than the oldest openarm_driver this node accepts, so their absence
-    has to be tolerated rather than assumed away.
+    get_health() reports every counter openarm_can tracks; `state` only ever
+    surfaced the subset an operator acts on, so this keeps that surface
+    unchanged rather than growing STATE_TYPE (and every UI reading it) every
+    time openarm_driver's own diagnostics grow.
     """
-
-    def __init__(self, arm):
-        """Bind to `arm`, or to nothing when there is no arm yet."""
-        self._openarm = getattr(arm, "openarm", None)
-        self.has_gripper = bool(getattr(arm, "gripper_posforce", False))
-        self._available = hasattr(self._openarm, "get_bus_status") and hasattr(
-            openarm_can, "motor_error_to_string"
-        )
-        self._axes = []
-        if self._available:
-            try:
-                collections = [arm.openarm.get_arm()]
-                self._axes = [(0, i) for i in range(arm.num_mit_motors)]
-                if getattr(arm, "gripper_posforce", False):
-                    collections.append(arm.openarm.get_gripper())
-                    self._axes.append((1, 0))
-                self._collections = collections
-            except Exception:
-                self._available = False
-        self._carrier = True
-        self._carrier_read_at = 0.0
-
-    def _carrier_now(self) -> bool:
-        now = time.monotonic()
-        if now - self._carrier_read_at >= CARRIER_POLL_INTERVAL_S:
-            self._carrier = bool(self._openarm.is_link_running())
-            self._carrier_read_at = now
-        return self._carrier
-
-    def read(self) -> tuple[list[str], bool, dict]:
-        """Per-motor status names, whether the last is the gripper, and the bus."""
-        if not self._available:
-            return [], self.has_gripper, dict(_EMPTY_BUS)
-        try:
-            motors = [c.get_motors() for c in self._collections]
-            status = []
-            for collection_index, motor_index in self._axes:
-                collection = self._collections[collection_index]
-                link = collection.get_link_stats(motor_index)
-                if not link.ever_responded() or link.is_stale(AXIS_SILENT_AFTER_S):
-                    status.append("SILENT")
-                    continue
-                motor = motors[collection_index][motor_index]
-                status.append(openarm_can.motor_error_to_string(motor.get_error_code()))
-
-            bus = self._openarm.get_bus_status()
-            snapshot = {"carrier": self._carrier_now()}
-            for name in BUS_COUNTERS:
-                snapshot[name] = int(getattr(bus, name).count)
-            snapshot["net_down"] = int(bus.write_net_down.count)
-            return status, self.has_gripper, snapshot
-        except Exception:
-            # Reporting must not be the reason a state message is dropped.
-            self._available = False
-            return [], self.has_gripper, dict(_EMPTY_BUS)
+    if not bus:
+        return dict(_EMPTY_BUS)
+    return {
+        "carrier": bus["carrier"],
+        "bus_off": bus["bus_off"],
+        "error_passive": bus["error_passive"],
+        "error_warning": bus["error_warning"],
+        "ack_error": bus["ack_error"],
+        "tx_overflow": bus["tx_overflow"],
+        "rx_overflow": bus["rx_overflow"],
+        "net_down": bus["write_net_down"],
+    }
 
 
-def build_state_output(state, health: tuple[list[str], bool, dict]) -> pa.Array:
-    """Wrap a state dict as a length-1 StructArray: [{"qpos": [...], ...}]."""
-    motor_status, has_gripper, bus = health
+def build_state_output(state, health: tuple[list[str], dict]) -> pa.Array:
+    """Wrap a state dict as a length-1 StructArray: [{"qpos": [...], ...}].
+
+    `health` is `arm.get_health()`'s return value, forwarded as-is: this
+    node reports what openarm_driver already knows and does not read
+    openarm_can itself.
+    """
+    motor_status, bus = health
+    bus = _bus_snapshot(bus)
     return pa.array(
         [
             {
@@ -243,7 +195,6 @@ def build_state_output(state, health: tuple[list[str], bool, dict]) -> pa.Array:
                 "tmos": state["tmos"],
                 "trotor": state["trotor"],
                 "motor_status": motor_status,
-                "has_gripper": has_gripper,
                 "bus": bus,
             }
         ],
@@ -333,11 +284,9 @@ def main():
     config = openarm_driver.Config(args.config)
     align_threshold = args.align_threshold
     arm = None
-    health = HealthReader(None)
     ready_status = ArmStatus.ALIGNED if args.align else ArmStatus.STARTED
     if args.start_on_startup:
         arm = _build_arm(name, config, args.can_interface)
-        health = HealthReader(arm)
         arm.start()
         align_state = (
             AlignState(step_limit=args.align_delta_limit) if args.align else None
@@ -360,7 +309,6 @@ def main():
                     arm.stop()  # Stop the existing session before replacing it
                 # Re-initialize the arm to ensure a fresh start
                 arm = _build_arm(name, config, args.can_interface)
-                health = HealthReader(arm)
                 arm.start()
                 align_state = (
                     AlignState(step_limit=args.align_delta_limit)
@@ -375,7 +323,6 @@ def main():
                 if arm is not None:
                     arm.stop()
                     arm = None  # Drop the instance to free resources
-                    health = HealthReader(None)
                 align_state = None
         elif event_id == "request_position":
             if status is ArmStatus.STOPPED:
@@ -391,7 +338,7 @@ def main():
             if status is ArmStatus.STOPPED:
                 continue
             state = arm.fetch_state(refresh=args.refresh_every_request)
-            node.send_output("state", build_state_output(state, health.read()))
+            node.send_output("state", build_state_output(state, arm.get_health()))
         elif event_id == "move_position":
             if status is ArmStatus.STOPPED:
                 continue
