@@ -100,15 +100,6 @@ BUS_TYPE = pa.struct(
     ]
 )
 
-BUS_COUNTERS = (
-    "bus_off",
-    "error_passive",
-    "error_warning",
-    "ack_error",
-    "tx_overflow",
-    "rx_overflow",
-)
-
 STATE_TYPE = pa.struct(
     [
         ("qpos", pa.list_(pa.float32())),
