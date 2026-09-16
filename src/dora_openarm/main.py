@@ -141,20 +141,6 @@ def build_qpos_output(qpos: np.ndarray) -> pa.Array:
     return pa.array([{"qpos": qpos}], type=QPOS_TYPE)
 
 
-def _build_arm(name, config, can_interface):
-    """Construct a SingleArmDriver, passing can_interface only when asked for.
-
-    Older openarm_driver doesn't accept this keyword at all, so passing it
-    unconditionally would break every run on that version -- not just the
-    ones that actually want to override the interface. Leaving it out when
-    unset keeps this node working against any openarm_driver >= 0.2.0; only
-    --can-interface itself needs the newer one.
-    """
-    if can_interface is None:
-        return openarm_driver.SingleArmDriver(name, config)
-    return openarm_driver.SingleArmDriver(name, config, can_interface=can_interface)
-
-
 def _bus_snapshot(bus: dict) -> dict:
     """Narrow openarm_driver's get_health() bus dict to what `state` publishes.
 
@@ -286,7 +272,9 @@ def main():
     arm = None
     ready_status = ArmStatus.ALIGNED if args.align else ArmStatus.STARTED
     if args.start_on_startup:
-        arm = _build_arm(name, config, args.can_interface)
+        arm = openarm_driver.SingleArmDriver(
+            name, config, can_interface=args.can_interface
+        )
         arm.start()
         align_state = (
             AlignState(step_limit=args.align_delta_limit) if args.align else None
@@ -308,7 +296,9 @@ def main():
                 if arm is not None:
                     arm.stop()  # Stop the existing session before replacing it
                 # Re-initialize the arm to ensure a fresh start
-                arm = _build_arm(name, config, args.can_interface)
+                arm = openarm_driver.SingleArmDriver(
+                    name, config, can_interface=args.can_interface
+                )
                 arm.start()
                 align_state = (
                     AlignState(step_limit=args.align_delta_limit)
