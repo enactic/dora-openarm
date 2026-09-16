@@ -42,7 +42,7 @@ class AlignState:
     step_limit: float = 0.001
 
 
-def _align(arm, state, new_position, name, threshold, trigger=None):
+def _align(arm, state, new_position, name, threshold, send_position, trigger=None):
     """Safety: Align OpenArm with the position."""
     if trigger == "gripper":  # Check if gripper is active (threshold ~ -10 deg)
         gripper_position = new_position[-1]  # Last value is gripper's position
@@ -61,14 +61,14 @@ def _align(arm, state, new_position, name, threshold, trigger=None):
     def is_aligned(position1, position2):
         return np.all(np.abs(position1[:-1] - position2[:-1]) < threshold)
 
-    # If OpenArm is already aligned, we do nothing.
+    # Commit the final target before reporting alignment complete.
     if is_aligned(new_position, current_position):
-        return True
+        return send_position(new_position)
     diff = new_position - state.align_target
     step_move = np.clip(diff, -state.step_limit, state.step_limit)
     state.align_target += step_move
 
-    arm.send_position(state.align_target)
+    send_position(state.align_target)
 
     # Check the physical position on the next command after the arm has moved.
     return False
@@ -197,6 +197,14 @@ def command_epoch_matches(metadata: dict, start_epoch: int) -> bool:
     )
 
 
+def startup_command_metadata(arm) -> dict | None:
+    """Describe the final command dispatched by the driver's start trajectory."""
+    executed_timestamp = arm.last_command_dispatch_timestamp_ns
+    if executed_timestamp is None:
+        return None
+    return {"timestamp": executed_timestamp}
+
+
 def main():
     """Move to the given position and output the current position."""
     parser = argparse.ArgumentParser(description="Control OpenArm")
@@ -273,6 +281,7 @@ def main():
     align_threshold = args.align_threshold
     arm = None
     start_epoch = 0
+    latest_command_metadata = None
     ready_status = ArmStatus.ALIGNED if args.align else ArmStatus.STARTED
 
     def output_metadata(metadata: dict | None = None) -> dict:
@@ -286,6 +295,7 @@ def main():
         )
         arm.start()
         start_epoch += 1
+        latest_command_metadata = startup_command_metadata(arm)
         align_state = (
             AlignState(step_limit=args.align_delta_limit) if args.align else None
         )
@@ -295,6 +305,34 @@ def main():
         align_state = None
         status = ArmStatus.STOPPED
         node.send_output("status", pa.array([ArmStatus.STOPPED]), output_metadata())
+
+    def send_latest_command() -> None:
+        """Publish the last command that the driver actually accepted."""
+        if arm is None or latest_command_metadata is None:
+            return
+        executed_timestamp = arm.last_command_dispatch_timestamp_ns
+        if executed_timestamp is None:
+            return
+        metadata = output_metadata(latest_command_metadata)
+        metadata["executed_timestamp"] = executed_timestamp
+        node.send_output(
+            "latest_command",
+            build_qpos_output(np.asarray(arm.last_command, dtype=np.float32)),
+            metadata,
+        )
+
+    def send_position(position: np.ndarray, metadata: dict) -> bool:
+        """Send one checked command and cache metadata for request_command."""
+        nonlocal latest_command_metadata
+        if not arm.send_position(position):
+            return False
+        if arm.last_command_dispatch_timestamp_ns is None:
+            raise RuntimeError(
+                "driver accepted a command without an executed timestamp"
+            )
+        latest_command_metadata = dict(metadata)
+        return True
+
     for event in node:
         if event["type"] != "INPUT":
             continue
@@ -305,12 +343,14 @@ def main():
             if command == "start":
                 if arm is not None:
                     arm.stop()  # Stop the existing session before replacing it
+                latest_command_metadata = None
                 # Re-initialize the arm to ensure a fresh start
                 arm = openarm_driver.SingleArmDriver(
                     name, config, can_interface=args.can_interface
                 )
                 arm.start()
                 start_epoch += 1
+                latest_command_metadata = startup_command_metadata(arm)
                 align_state = (
                     AlignState(step_limit=args.align_delta_limit)
                     if args.align
@@ -330,6 +370,7 @@ def main():
                 if arm is not None:
                     arm.stop()
                     arm = None  # Drop the instance to free resources
+                latest_command_metadata = None
                 align_state = None
         elif event_id == "request_position":
             if status is ArmStatus.STOPPED:
@@ -354,6 +395,10 @@ def main():
             metadata = output_metadata(event["metadata"])
             metadata["timestamp"] = snapshot_timestamp
             node.send_output("state", build_state_output(state, health), metadata)
+        elif event_id == "request_command":
+            if status is ArmStatus.STOPPED:
+                continue
+            send_latest_command()
         elif event_id == "move_position":
             if status is ArmStatus.STOPPED:
                 continue
@@ -381,7 +426,7 @@ def main():
                 # other_arm_position = None
 
             if status is ready_status:
-                arm.send_position(new_position)
+                send_position(new_position, event["metadata"])
             elif status is ArmStatus.STARTED:
                 is_aligned = _align(
                     arm,
@@ -389,10 +434,10 @@ def main():
                     new_position,
                     name,
                     align_threshold,
+                    lambda position: send_position(position, event["metadata"]),
                     trigger=args.align_trigger,
                 )
                 if is_aligned:
-                    arm.send_position(new_position)
                     status = ArmStatus.ALIGNED
                     node.send_output(
                         "status",
