@@ -14,7 +14,7 @@
 
 [project]
 name = "dora-openarm"
-version = "1.1.0"
+version = "1.2.0"
 authors = [{ name = "Enactic, Inc." }]
 description = "Dora node to control OpenArm"
 license = { text = "Apache-2.0" }
