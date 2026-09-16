@@ -17,10 +17,12 @@
 import argparse
 import dataclasses
 import enum
+import numbers
 import dora
 import openarm_driver
 import os
 import pathlib
+import time
 import pyarrow as pa
 import numpy as np
 
@@ -186,6 +188,18 @@ def extract_values(value: pa.Array, key: str) -> np.ndarray:
     return np.array(value, dtype=np.float32)
 
 
+def command_epoch_matches(metadata: dict, start_epoch: int) -> bool:
+    """Accept legacy commands or commands addressed to the current start."""
+    if "start_epoch" not in metadata:
+        return True
+    value = metadata["start_epoch"]
+    return (
+        isinstance(value, numbers.Integral)
+        and not isinstance(value, bool)
+        and int(value) == start_epoch
+    )
+
+
 def main():
     """Move to the given position and output the current position."""
     parser = argparse.ArgumentParser(description="Control OpenArm")
@@ -261,21 +275,29 @@ def main():
     config = openarm_driver.Config(args.config)
     align_threshold = args.align_threshold
     arm = None
+    start_epoch = 0
     ready_status = ArmStatus.ALIGNED if args.align else ArmStatus.STARTED
+
+    def output_metadata(metadata: dict | None = None) -> dict:
+        result = dict(metadata or {})
+        result["start_epoch"] = start_epoch
+        return result
+
     if args.start_on_startup:
         arm = openarm_driver.SingleArmDriver(
             name, config, can_interface=args.can_interface
         )
         arm.start()
+        start_epoch += 1
         align_state = (
             AlignState(step_limit=args.align_delta_limit) if args.align else None
         )
         status = ArmStatus.STARTED
-        node.send_output("status", pa.array([status]))
+        node.send_output("status", pa.array([status]), output_metadata())
     else:
         align_state = None
         status = ArmStatus.STOPPED
-        node.send_output("status", pa.array([ArmStatus.STOPPED]))
+        node.send_output("status", pa.array([ArmStatus.STOPPED]), output_metadata())
     for event in node:
         if event["type"] != "INPUT":
             continue
@@ -291,16 +313,23 @@ def main():
                     name, config, can_interface=args.can_interface
                 )
                 arm.start()
+                start_epoch += 1
                 align_state = (
                     AlignState(step_limit=args.align_delta_limit)
                     if args.align
                     else None
                 )
                 status = ArmStatus.STARTED
-                node.send_output("status", pa.array([status]))
+                node.send_output(
+                    "status", pa.array([status]), output_metadata(event["metadata"])
+                )
             elif command == "stop":
                 status = ArmStatus.STOPPED
-                node.send_output("status", pa.array([ArmStatus.STOPPED]))
+                node.send_output(
+                    "status",
+                    pa.array([ArmStatus.STOPPED]),
+                    output_metadata(event["metadata"]),
+                )
                 if arm is not None:
                     arm.stop()
                     arm = None  # Drop the instance to free resources
@@ -311,17 +340,33 @@ def main():
             current_position = arm.fetch_position(
                 refresh=args.refresh_every_request,
             )
+            snapshot_timestamp = time.time_ns()
+            metadata = output_metadata(event["metadata"])
+            metadata["timestamp"] = snapshot_timestamp
             node.send_output(
                 "position",
                 build_qpos_output(np.asarray(current_position, dtype=np.float32)),
+                metadata,
             )
         elif event_id == "request_state":
             if status is ArmStatus.STOPPED:
                 continue
             state = arm.fetch_state(refresh=args.refresh_every_request)
-            node.send_output("state", build_state_output(state, arm.get_health()))
+            health = arm.get_health()
+            snapshot_timestamp = time.time_ns()
+            metadata = output_metadata(event["metadata"])
+            metadata["timestamp"] = snapshot_timestamp
+            node.send_output("state", build_state_output(state, health), metadata)
         elif event_id == "move_position":
             if status is ArmStatus.STOPPED:
+                continue
+            if not command_epoch_matches(event["metadata"], start_epoch):
+                print(
+                    "Ignoring move_position with malformed or stale "
+                    f"start_epoch: {event['metadata'].get('start_epoch')!r} "
+                    f"(current={start_epoch})",
+                    flush=True,
+                )
                 continue
             value = event["value"]
             if isinstance(value, pa.StructArray):
@@ -352,7 +397,11 @@ def main():
                 if is_aligned:
                     arm.send_position(new_position)
                     status = ArmStatus.ALIGNED
-                    node.send_output("status", pa.array([ArmStatus.ALIGNED]))
+                    node.send_output(
+                        "status",
+                        pa.array([ArmStatus.ALIGNED]),
+                        output_metadata(event["metadata"]),
+                    )
     if arm is not None:
         if args.stop:
             arm.stop()
