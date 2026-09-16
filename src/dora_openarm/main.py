@@ -17,7 +17,6 @@
 import argparse
 import dataclasses
 import enum
-import numbers
 import dora
 import openarm_driver
 import os
@@ -194,9 +193,7 @@ def command_epoch_matches(metadata: dict, start_epoch: int) -> bool:
         return True
     value = metadata["start_epoch"]
     return (
-        isinstance(value, numbers.Integral)
-        and not isinstance(value, bool)
-        and int(value) == start_epoch
+        isinstance(value, int) and not isinstance(value, bool) and value == start_epoch
     )
 
 
