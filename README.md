@@ -43,6 +43,7 @@ nodes:
 | --- | --- |
 | `--side` | OpenArm side to control. Default: `right`. |
 | `--config` | Path to the OpenArm configuration file. Default: `openarm_cell.yaml`. |
+| `--can-interface` | SocketCAN interface to use, overriding the one in the configuration file. Default: the configuration file's value. |
 | `--align-trigger` | Optional trigger for the initial alignment step. Supported value: `gripper`. |
 | `--align-threshold` | Alignment threshold in radians. Default: `0.1`. |
 | `--align-delta-limit` | Maximum joint delta per initial-alignment command in radians. Default: `0.001`. |
@@ -63,7 +64,7 @@ nodes:
 | Output | Description |
 | --- | --- |
 | `position` | Current arm position as a length-1 struct containing a float32 array: `[{"qpos": [...]}]`. |
-| `state` | Current arm state as a length-1 struct with list fields: `[{"qpos": [...], "qvel": [...], "qtorque": [...], "tmos": [...], "trotor": [...]}]`. `qpos`, `qvel`, and `qtorque` are float32 lists; `tmos` (MOS temperature) and `trotor` (rotor temperature) are int32 lists per motor, in °C. |
+| `state` | Current arm state as a length-1 struct: `[{"qpos": [...], "qvel": [...], "qtorque": [...], "tmos": [...], "trotor": [...], "motor_status": [...], "bus": {...}}]`. `qpos`, `qvel`, and `qtorque` are float32 lists; `tmos` (MOS temperature) and `trotor` (rotor temperature) are int32 lists per motor, in °C. `motor_status` is a string list with one entry per motor in `qpos` order: the motor's own status name, or `SILENT` if it has stopped answering. `bus` is a struct describing the CAN interface: `carrier` (bool, whether the link is up) and the cumulative fault counters `bus_off`, `error_passive`, `error_warning`, `ack_error`, `tx_overflow`, `rx_overflow`, and `net_down` (int64). The counters only grow while the node runs, so compare against a baseline to see what happened during a given period. |
 | `status` | Current control state as a string array: `stopped`, `started`, or `aligned`. With alignment enabled, `aligned` is emitted once initial alignment completes. |
 
 ## License
