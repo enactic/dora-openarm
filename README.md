@@ -67,6 +67,19 @@ nodes:
 | `state` | Current arm state as a length-1 struct: `[{"qpos": [...], "qvel": [...], "qtorque": [...], "tmos": [...], "trotor": [...], "motor_status": [...], "bus": {...}}]`. `qpos`, `qvel`, and `qtorque` are float32 lists; `tmos` (MOS temperature) and `trotor` (rotor temperature) are int32 lists per motor, in °C. `motor_status` is a string list with one entry per motor in `qpos` order: the motor's own status name, or `SILENT` if it has stopped answering. `bus` is a struct describing the CAN interface: `carrier` (bool, whether the link is up) and the cumulative fault counters `bus_off`, `error_passive`, `error_warning`, `ack_error`, `tx_overflow`, `rx_overflow`, and `net_down` (int64). The counters only grow while the node runs, so compare against a baseline to see what happened during a given period. |
 | `status` | Current control state as a string array: `stopped`, `started`, or `aligned`. With alignment enabled, `aligned` is emitted once initial alignment completes. |
 
+`request_state` publishes only `state`; `request_position` publishes only
+`position`. Each observation includes `observation_timestamp`: integer Unix
+wall-clock nanoseconds captured after the snapshot is read. Request metadata is
+preserved except for `timestamp`, which is removed so Dora supplies the output
+message timestamp.
+
+Every output includes a process-local `start_epoch`, starting at zero and
+incrementing after each successful start, including `--start-on-startup`.
+Commands with an epoch must supply a non-boolean integer matching the current
+session; malformed or mismatched epochs are ignored. Commands without an epoch
+remain accepted for compatibility. The epoch resets on process restart and
+does not detect reordered commands within a session.
+
 ## License
 
 Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
