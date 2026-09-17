@@ -339,7 +339,8 @@ def main():
             )
             snapshot_timestamp = time.time_ns()
             metadata = output_metadata(event["metadata"])
-            metadata["timestamp"] = snapshot_timestamp
+            metadata.pop("timestamp", None)
+            metadata["observation_timestamp"] = snapshot_timestamp
             node.send_output(
                 "position",
                 build_qpos_output(np.asarray(current_position, dtype=np.float32)),
@@ -352,7 +353,8 @@ def main():
             health = arm.get_health()
             snapshot_timestamp = time.time_ns()
             metadata = output_metadata(event["metadata"])
-            metadata["timestamp"] = snapshot_timestamp
+            metadata.pop("timestamp", None)
+            metadata["observation_timestamp"] = snapshot_timestamp
             node.send_output("state", build_state_output(state, health), metadata)
         elif event_id == "move_position":
             if status is ArmStatus.STOPPED:

@@ -68,8 +68,10 @@ nodes:
 | `status` | Current control state as a string array: `stopped`, `started`, or `aligned`. With alignment enabled, `aligned` is emitted once initial alignment completes. |
 
 `request_state` publishes only `state`; `request_position` publishes only
-`position`. Each observation preserves request metadata but replaces
-`timestamp` with wall-clock nanoseconds captured after the snapshot is read.
+`position`. Each observation includes `observation_timestamp`: integer Unix
+wall-clock nanoseconds captured after the snapshot is read. Request metadata is
+preserved except for `timestamp`, which is removed so Dora supplies the output
+message timestamp.
 
 Every output includes a process-local `start_epoch`, starting at zero and
 incrementing after each successful start, including `--start-on-startup`.
