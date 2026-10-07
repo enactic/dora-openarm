@@ -61,14 +61,18 @@ def _align(arm, state, new_position, name, threshold, trigger=None):
     def is_aligned(position1, position2):
         return np.all(np.abs(position1[:-1] - position2[:-1]) < threshold)
 
-    # If OpenArm is already aligned, we do nothing.
+    # If OpenArm is already aligned, alignment completes once the driver
+    # accepts the final target.
     if is_aligned(new_position, current_position):
-        return True
+        return arm.send_position(new_position)
     diff = new_position - state.align_target
     step_move = np.clip(diff, -state.step_limit, state.step_limit)
-    state.align_target += step_move
+    next_target = state.align_target + step_move
 
-    arm.send_position(state.align_target)
+    # Advance only when the driver accepts the target, so that a rejected
+    # step is retried instead of skipped.
+    if arm.send_position(next_target):
+        state.align_target = next_target
 
     # Check the physical position on the next command after the arm has moved.
     return False
@@ -385,7 +389,6 @@ def main():
                     trigger=args.align_trigger,
                 )
                 if is_aligned:
-                    arm.send_position(new_position)
                     status = ArmStatus.ALIGNED
                     node.send_output(
                         "status",

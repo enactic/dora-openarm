@@ -46,7 +46,7 @@ nodes:
 | `--can-interface` | SocketCAN interface to use, overriding the one in the configuration file. Default: the configuration file's value. |
 | `--align-trigger` | Optional trigger for the initial alignment step. Supported value: `gripper`. |
 | `--align-threshold` | Alignment threshold in radians. Default: `0.1`. |
-| `--align-delta-limit` | Maximum joint delta per initial-alignment command in radians. Default: `0.001`. |
+| `--align-delta-limit` | Maximum joint delta per intermediate initial-alignment command in radians. Once the arm is within `--align-threshold`, the final target is sent directly. Default: `0.001`. |
 | `--[no-]align` | Whether to align to incoming position commands after the arm starts. Default: enabled. |
 | `--[no-]stop` | Whether to stop the arm when the node exits. Default: controlled by the `STOP` environment variable, or `true` when it is unset. |
 | `--[no-]refresh-every-request` | Whether to refresh OpenArm state before each request. Default: controlled by the `REFRESH` environment variable, or `true` when it is unset. |
