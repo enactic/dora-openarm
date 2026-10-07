@@ -287,6 +287,20 @@ def main():
         result["start_epoch"] = start_epoch
         return result
 
+    def send_commanded_position(metadata: dict):
+        # The driver resets this on start, so it is None until the
+        # first position command of this session is dispatched.
+        dispatch_timestamp = arm.last_command_dispatch_timestamp_ns
+        if dispatch_timestamp is None:
+            return
+        metadata = dict(metadata)
+        metadata["dispatch_timestamp"] = dispatch_timestamp
+        node.send_output(
+            "commanded_position",
+            build_qpos_output(np.asarray(arm.last_command, dtype=np.float32)),
+            metadata,
+        )
+
     align_state = None
     status = ArmStatus.STOPPED
 
@@ -350,6 +364,7 @@ def main():
                 build_qpos_output(np.asarray(current_position, dtype=np.float32)),
                 metadata,
             )
+            send_commanded_position(metadata)
         elif event_id == "request_state":
             if status is ArmStatus.STOPPED:
                 continue
@@ -360,6 +375,7 @@ def main():
             metadata.pop("timestamp", None)
             metadata["observation_timestamp"] = snapshot_timestamp
             node.send_output("state", build_state_output(state, health), metadata)
+            send_commanded_position(metadata)
         elif event_id == "move_position":
             if status is ArmStatus.STOPPED:
                 continue
