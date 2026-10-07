@@ -287,21 +287,31 @@ def main():
         result["start_epoch"] = start_epoch
         return result
 
-    if args.start_on_startup:
+    align_state = None
+    status = ArmStatus.STOPPED
+
+    def start_arm():
+        nonlocal arm, start_epoch, align_state, status
+        if arm is not None:
+            arm.stop()  # Stop the existing session before replacing it
+        align_state = None
+        status = ArmStatus.STOPPED
+        # Re-initialize the arm to ensure a fresh start
         arm = openarm_driver.SingleArmDriver(
             name, config, can_interface=args.can_interface
         )
-        arm.start()
+        # Keep the failed arm so that a later stop disables its motors.
+        if not arm.start():
+            return
         start_epoch += 1
         align_state = (
             AlignState(step_limit=args.align_delta_limit) if args.align else None
         )
         status = ArmStatus.STARTED
-        node.send_output("status", pa.array([status]), output_metadata())
-    else:
-        align_state = None
-        status = ArmStatus.STOPPED
-        node.send_output("status", pa.array([ArmStatus.STOPPED]), output_metadata())
+
+    if args.start_on_startup:
+        start_arm()
+    node.send_output("status", pa.array([status]), output_metadata())
     for event in node:
         if event["type"] != "INPUT":
             continue
@@ -310,20 +320,7 @@ def main():
         if event_id == "command":
             command = event["value"][0].as_py()
             if command == "start":
-                if arm is not None:
-                    arm.stop()  # Stop the existing session before replacing it
-                # Re-initialize the arm to ensure a fresh start
-                arm = openarm_driver.SingleArmDriver(
-                    name, config, can_interface=args.can_interface
-                )
-                arm.start()
-                start_epoch += 1
-                align_state = (
-                    AlignState(step_limit=args.align_delta_limit)
-                    if args.align
-                    else None
-                )
-                status = ArmStatus.STARTED
+                start_arm()
                 node.send_output(
                     "status", pa.array([status]), output_metadata(event["metadata"])
                 )

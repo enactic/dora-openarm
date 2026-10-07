@@ -82,6 +82,12 @@ session; malformed or mismatched epochs are ignored. Commands without an epoch
 remain accepted for compatibility. The epoch resets on process restart and
 does not detect reordered commands within a session.
 
+If the arm fails to start, for example because the driver's startup motion is
+interrupted by a safety check, the node publishes `stopped` and does not
+increment `start_epoch`. `request_position`, `request_state`, and
+`move_position` are ignored until the arm is started again. The motors may stay
+enabled until the arm is stopped or started again.
+
 ## License
 
 Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
