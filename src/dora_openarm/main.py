@@ -180,10 +180,17 @@ def build_state_output(state, health: tuple[list[str], dict]) -> pa.Array:
     )
 
 
-def extract_values(value: pa.Array, key: str) -> np.ndarray:
-    """Read `key` from a length-1 StructArray, or a flat array as-is."""
+def extract_position(value: pa.Array) -> np.ndarray:
+    """Read a position from a struct, or a flat array as-is.
+
+    The struct is a length-1 struct containing `qpos` (`[{"qpos": [...]}]`),
+    or a legacy struct with one `new_position` row per joint.
+    """
     if pa.types.is_struct(value.type):
-        value = value.field(key)[0].values
+        if "qpos" in value.type.names:
+            value = value.field("qpos")[0].values
+        else:
+            value = value.field("new_position")
     return np.array(value, dtype=np.float32)
 
 
@@ -367,20 +374,7 @@ def main():
                     flush=True,
                 )
                 continue
-            value = event["value"]
-            if isinstance(value, pa.StructArray):
-                names = value.type.names
-                if "qpos" in names:
-                    new_position = extract_values(value, "qpos")
-                else:
-                    new_position = np.array(
-                        value.field("new_position"), dtype=np.float32
-                    )
-                # TODO: We use this for safety check later.
-                # other_arm_position = value.field("other_arm_position")
-            else:
-                new_position = np.array(value, dtype=np.float32)
-                # other_arm_position = None
+            new_position = extract_position(event["value"])
 
             if status is ready_status:
                 arm.send_position(new_position)
