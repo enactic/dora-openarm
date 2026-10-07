@@ -50,7 +50,7 @@ nodes:
 | `--[no-]align` | Whether to align to incoming position commands after the arm starts. Default: enabled. |
 | `--[no-]stop` | Whether to stop the arm when the node exits. Default: controlled by the `STOP` environment variable, or `true` when it is unset. |
 | `--[no-]refresh-every-request` | Whether to refresh OpenArm state before each request. Default: controlled by the `REFRESH` environment variable, or `true` when it is unset. |
-| `--[no-]start-on-startup` | Whether to start the arm when the node starts. Default: disabled. |
+| `--[no-]start-on-startup` | Whether to start the arm when the node starts. When disabled, send `start` to the `command` input to start the arm. Default: disabled. |
 
 ### Inputs
 
@@ -58,6 +58,7 @@ nodes:
 | --- | --- |
 | `request_position` | Requests the current arm position. The event ID is used and the event value is ignored. |
 | `request_state` | Requests the current arm state. The event ID is used and the event value is ignored. |
+| `command` | Controls the arm. The value is a string array whose first element is `start` or `stop`. `start` stops the current session if any, then starts the arm again; `stop` stops the arm. Both publish `status`. Other values are ignored. |
 | `move_position` | Sends a new target position to the arm. The value may be a struct containing `qpos` (`[{"qpos": [...]}]`), a position array directly, or a legacy struct containing `new_position`. When initial alignment is enabled, this input drives the alignment until it completes. |
 
 ### Outputs
