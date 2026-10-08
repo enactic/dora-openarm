@@ -298,18 +298,32 @@ def run(node, args: argparse.Namespace, create_driver):
         result["start_epoch"] = start_epoch
         return result
 
+    # The dispatch timestamp and metadata of the last move_position whose
+    # target the driver sent.
+    sent_command = None
+
     def send_commanded_position(metadata: dict):
         # The driver resets this on start, so it is None until the
         # first position command of this session is dispatched.
         dispatch_timestamp = arm.last_command_dispatch_timestamp_ns
         if dispatch_timestamp is None:
             return
-        metadata = dict(metadata)
-        metadata["dispatch_timestamp"] = dispatch_timestamp
+        # Add the metadata only if the last sent target came from a
+        # move_position, not from e.g. the driver's startup motion.
+        command_metadata = {}
+        if sent_command is not None and sent_command[0] == dispatch_timestamp:
+            command_metadata = sent_command[1]
         node.send_output(
             "commanded_position",
             build_qpos_output(np.asarray(arm.last_command, dtype=np.float32)),
-            metadata,
+            {
+                **metadata,
+                **command_metadata,
+                # Keys this node sets take precedence over the command's.
+                "start_epoch": metadata["start_epoch"],
+                "observation_timestamp": metadata["observation_timestamp"],
+                "dispatch_timestamp": dispatch_timestamp,
+            },
         )
 
     align_state = None
@@ -398,6 +412,7 @@ def run(node, args: argparse.Namespace, create_driver):
                 continue
             new_position = extract_position(event["value"])
 
+            dispatch_timestamp = arm.last_command_dispatch_timestamp_ns
             if status is ready_status:
                 arm.send_position(new_position)
             elif status is ArmStatus.STARTED:
@@ -416,6 +431,15 @@ def run(node, args: argparse.Namespace, create_driver):
                         pa.array([ArmStatus.ALIGNED]),
                         output_metadata(event["metadata"]),
                     )
+            # The dispatch timestamp changes only when the driver sends a
+            # target, including an intermediate alignment step.
+            if arm.last_command_dispatch_timestamp_ns != dispatch_timestamp:
+                command_metadata = dict(event["metadata"])
+                command_metadata.pop("timestamp", None)
+                sent_command = (
+                    arm.last_command_dispatch_timestamp_ns,
+                    command_metadata,
+                )
     if arm is not None:
         if args.stop:
             arm.stop()

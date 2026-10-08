@@ -81,6 +81,14 @@ published for the same request, plus `dispatch_timestamp`: integer Unix
 wall-clock nanoseconds when the driver sent the command. Declare
 `commanded_position` in the node's `outputs` only if you need it.
 
+When the command was sent for a `move_position`, including an intermediate
+alignment step, `commanded_position` also includes that `move_position`'s
+metadata, such as chunk identifiers, except for `timestamp`. If a key is in
+both, the `move_position` value is used, except for `start_epoch`,
+`observation_timestamp`, and `dispatch_timestamp`, which this node sets.
+Commands rejected by the driver and the driver's startup motion add no
+`move_position` metadata.
+
 Every output includes a process-local `start_epoch`, starting at zero and
 incrementing after each successful start, including `--start-on-startup`.
 Commands with an epoch must supply a non-boolean integer matching the current

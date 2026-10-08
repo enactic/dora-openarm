@@ -16,6 +16,7 @@
 
 import datetime
 import itertools
+from unittest import mock
 
 import numpy as np
 import pyarrow as pa
@@ -47,10 +48,14 @@ class _Node:
 
 
 class _Driver:
-    """Sends targets clipped to [-1, 1]. Fails to start if `started` is False."""
+    """Sends targets clipped to [-1, 1], except for the targets in `rejected`.
 
-    def __init__(self, started=True):
+    Fails to start if `started` is False.
+    """
+
+    def __init__(self, started=True, rejected=()):
         self.started = started
+        self.rejected = rejected
         self._clock = itertools.count(_TIMESTAMP)
         self.last_command = np.zeros(8)
         self.last_command_dispatch_timestamp_ns = None
@@ -67,6 +72,8 @@ class _Driver:
         return np.zeros(8)
 
     def send_position(self, position):
+        if any(np.array_equal(position, target) for target in self.rejected):
+            return False
         self.last_command = np.clip(position, -1, 1)
         self.last_command_dispatch_timestamp_ns = next(self._clock)
         return True
@@ -84,14 +91,11 @@ def _move(position, **metadata):
 def _run(events, argv, driver):
     node = _Node(events)
     # Don't depend on the STOP environment variable.
-    run(node, parse_args(["--stop", *argv]), lambda name: driver)
-    outputs = []
-    for output_id, data, metadata in node.outputs:
-        # Replace the wall-clock time with a fixed value.
-        if "observation_timestamp" in metadata:
-            metadata = {**metadata, "observation_timestamp": _OBSERVATION_TIMESTAMP}
-        outputs.append((output_id, data, metadata))
-    return outputs
+    args = parse_args(["--stop", *argv])
+    # Use a fixed wall-clock time.
+    with mock.patch("time.time_ns", return_value=_OBSERVATION_TIMESTAMP):
+        run(node, args, lambda name: driver)
+    return node.outputs
 
 
 def test_commanded_position():
@@ -165,4 +169,96 @@ def test_start_failure():
         ("status", ["stopped"], {"start_epoch": 0}),
         # The status after the start command.
         ("status", ["stopped"], {"start_epoch": 0}),
+    ]
+
+
+def _commanded_position_metadata(outputs):
+    return [
+        metadata
+        for output_id, _, metadata in outputs
+        if output_id == "commanded_position"
+    ]
+
+
+def test_commanded_position_command_metadata():
+    """Only the move_position that the driver sent last adds its metadata."""
+    outputs = _run(
+        [
+            _input("request_position"),
+            _move(
+                [0.25] * 8,
+                chunk_id="A",
+                timestamp=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+                observation_timestamp=1,
+            ),
+            _input("request_position"),
+            _move([0.5] * 8, chunk_id="B"),
+            _input("request_position"),
+        ],
+        ["--no-align", "--start-on-startup"],
+        _Driver(rejected=[[0.5] * 8]),
+    )
+    assert _commanded_position_metadata(outputs) == [
+        # The startup motion has no move_position metadata.
+        {
+            "start_epoch": 1,
+            "observation_timestamp": _OBSERVATION_TIMESTAMP,
+            "dispatch_timestamp": _TIMESTAMP,
+        },
+        # Dora's timestamp is dropped, and observation_timestamp is this
+        # node's, not A's.
+        {
+            "start_epoch": 1,
+            "observation_timestamp": _OBSERVATION_TIMESTAMP,
+            "chunk_id": "A",
+            "dispatch_timestamp": _TIMESTAMP + 1,
+        },
+        # The driver rejected B, so A is still the last sent command.
+        {
+            "start_epoch": 1,
+            "observation_timestamp": _OBSERVATION_TIMESTAMP,
+            "chunk_id": "A",
+            "dispatch_timestamp": _TIMESTAMP + 1,
+        },
+    ]
+
+
+def test_commanded_position_alignment_metadata():
+    """An intermediate alignment step adds its move_position metadata."""
+    outputs = _run(
+        [
+            _move([0.5] * 8, chunk_id="A"),
+            _input("request_position"),
+        ],
+        ["--align", "--start-on-startup"],
+        _Driver(),
+    )
+    assert _commanded_position_metadata(outputs) == [
+        {
+            "start_epoch": 1,
+            "observation_timestamp": _OBSERVATION_TIMESTAMP,
+            "chunk_id": "A",
+            "dispatch_timestamp": _TIMESTAMP + 1,
+        },
+    ]
+
+
+def test_commanded_position_metadata_after_restart():
+    """Metadata from a previous session is not added."""
+    outputs = _run(
+        [
+            _move([0.25] * 8, chunk_id="A"),
+            _input("command", pa.array(["start"])),
+            _input("request_position"),
+        ],
+        ["--no-align", "--start-on-startup"],
+        _Driver(),
+    )
+    assert _commanded_position_metadata(outputs) == [
+        # The new session's startup motion has no move_position metadata.
+        {
+            "start_epoch": 2,
+            "observation_timestamp": _OBSERVATION_TIMESTAMP,
+            "dispatch_timestamp": _TIMESTAMP + 2,
+        },
     ]
