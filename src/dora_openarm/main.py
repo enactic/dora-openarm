@@ -208,8 +208,8 @@ def command_epoch_matches(metadata: dict, start_epoch: int) -> bool:
     )
 
 
-def main():
-    """Move to the given position and output the current position."""
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the node's command line arguments."""
     parser = argparse.ArgumentParser(description="Control OpenArm")
     parser.add_argument(
         "--side",
@@ -275,12 +275,19 @@ def main():
         default=False,
         help="Start the arm on startup.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.align_delta_limit <= 0.0:
         parser.error("--align-delta-limit must be positive")
-    node = dora.Node()
+    return args
+
+
+def run(node, args: argparse.Namespace, create_driver):
+    """Move to the given position and output the current position.
+
+    `create_driver(name)` creates a new, not yet started, OpenArm driver
+    for the arm `name`.
+    """
     name = f"{args.side}_arm"
-    config = openarm_driver.Config(args.config)
     align_threshold = args.align_threshold
     arm = None
     start_epoch = 0
@@ -315,9 +322,7 @@ def main():
         align_state = None
         status = ArmStatus.STOPPED
         # Re-initialize the arm to ensure a fresh start
-        arm = openarm_driver.SingleArmDriver(
-            name, config, can_interface=args.can_interface
-        )
+        arm = create_driver(name)
         # Keep the failed arm so that a later stop disables its motors.
         if not arm.start():
             return
@@ -416,6 +421,20 @@ def main():
             arm.stop()
         else:
             arm.move_to_start_position()
+
+
+def main():
+    """Run the node."""
+    args = parse_args()
+    node = dora.Node()
+    config = openarm_driver.Config(args.config)
+    run(
+        node,
+        args,
+        lambda name: openarm_driver.SingleArmDriver(
+            name, config, can_interface=args.can_interface
+        ),
+    )
 
 
 if __name__ == "__main__":
