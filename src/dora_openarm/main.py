@@ -90,18 +90,28 @@ QPOS_TYPE = pa.struct([("qpos", pa.list_(pa.float32()))])
 # Counters openarm_can keeps per interface. They latch, so a consumer that
 # wants "during this episode" has to difference them against a baseline of
 # its own rather than expect them to fall back to zero.
+#
+# The fields are the keys of openarm_driver's get_health() bus dict, so the
+# counters have the same names as in its log. pyarrow ignores keys that are
+# not listed here, so a counter that openarm_driver adds later is published
+# once it is added here.
 BUS_TYPE = pa.struct(
     [
         # The only instantaneous field. A bus-off with no auto-restart shows
         # up here; one that auto-restarts only moves the counters.
         ("carrier", pa.bool_()),
+        # In the order of openarm_driver's _BUS_COUNTER_NAMES.
         ("bus_off", pa.int64()),
         ("error_passive", pa.int64()),
         ("error_warning", pa.int64()),
-        ("ack_error", pa.int64()),
         ("tx_overflow", pa.int64()),
         ("rx_overflow", pa.int64()),
-        ("net_down", pa.int64()),
+        ("ack_error", pa.int64()),
+        ("tx_timeout", pa.int64()),
+        ("restarted", pa.int64()),
+        ("write_net_down", pa.int64()),
+        ("write_no_buffer", pa.int64()),
+        ("write_other", pa.int64()),
     ]
 )
 
@@ -120,43 +130,9 @@ STATE_TYPE = pa.struct(
 )
 
 
-_EMPTY_BUS = {
-    "carrier": True,
-    "bus_off": 0,
-    "error_passive": 0,
-    "error_warning": 0,
-    "ack_error": 0,
-    "tx_overflow": 0,
-    "rx_overflow": 0,
-    "net_down": 0,
-}
-
-
 def build_qpos_output(qpos: np.ndarray) -> pa.Array:
     """Wrap a qpos array as a length-1 StructArray: [{"qpos": [...]}]."""
     return pa.array([{"qpos": qpos}], type=QPOS_TYPE)
-
-
-def _bus_snapshot(bus: dict) -> dict:
-    """Narrow openarm_driver's get_health() bus dict to what `state` publishes.
-
-    get_health() reports every counter openarm_can tracks; `state` only ever
-    surfaced the subset an operator acts on, so this keeps that surface
-    unchanged rather than growing STATE_TYPE (and every UI reading it) every
-    time openarm_driver's own diagnostics grow.
-    """
-    if not bus:
-        return dict(_EMPTY_BUS)
-    return {
-        "carrier": bus["carrier"],
-        "bus_off": bus["bus_off"],
-        "error_passive": bus["error_passive"],
-        "error_warning": bus["error_warning"],
-        "ack_error": bus["ack_error"],
-        "tx_overflow": bus["tx_overflow"],
-        "rx_overflow": bus["rx_overflow"],
-        "net_down": bus["write_net_down"],
-    }
 
 
 def build_state_output(state, health: tuple[list[str], dict]) -> pa.Array:
@@ -167,7 +143,6 @@ def build_state_output(state, health: tuple[list[str], dict]) -> pa.Array:
     openarm_can itself.
     """
     motor_status, bus = health
-    bus = _bus_snapshot(bus)
     return pa.array(
         [
             {

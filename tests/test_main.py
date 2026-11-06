@@ -50,12 +50,13 @@ class _Node:
 class _Driver:
     """Sends targets clipped to [-1, 1], except for the targets in `rejected`.
 
-    Fails to start if `started` is False.
+    Fails to start if `started` is False. get_health() returns `health`.
     """
 
-    def __init__(self, started=True, rejected=()):
+    def __init__(self, started=True, rejected=(), health=None):
         self.started = started
         self.rejected = rejected
+        self.health = health
         self._clock = itertools.count(_TIMESTAMP)
         self.last_command = np.zeros(8)
         self.last_command_dispatch_timestamp_ns = None
@@ -70,6 +71,18 @@ class _Driver:
 
     def fetch_position(self, refresh=True):
         return np.zeros(8)
+
+    def fetch_state(self, refresh=True):
+        return {
+            "qpos": np.zeros(8),
+            "qvel": np.zeros(8),
+            "qtorque": np.zeros(8),
+            "tmos": np.zeros(8, dtype=int),
+            "trotor": np.zeros(8, dtype=int),
+        }
+
+    def get_health(self):
+        return self.health
 
     def send_position(self, position):
         if any(np.array_equal(position, target) for target in self.rejected):
@@ -261,4 +274,46 @@ def test_commanded_position_metadata_after_restart():
             "observation_timestamp": _OBSERVATION_TIMESTAMP,
             "dispatch_timestamp": _TIMESTAMP + 2,
         },
+    ]
+
+
+# The bus state that openarm_driver's get_health() returns: carrier and
+# every counter in its _BUS_COUNTER_NAMES.
+_BUS = {
+    "carrier": True,
+    "bus_off": 1,
+    "error_passive": 2,
+    "error_warning": 3,
+    "tx_overflow": 4,
+    "rx_overflow": 5,
+    "ack_error": 6,
+    "tx_timeout": 7,
+    "restarted": 8,
+    "write_net_down": 9,
+    "write_no_buffer": 10,
+    "write_other": 11,
+}
+
+
+def test_state_health():
+    """request_state publishes get_health() as openarm_driver reports it."""
+    motor_status = ["ENABLED"] * 7 + ["SILENT"]
+    outputs = _run(
+        [_input("request_state")],
+        ["--no-align", "--start-on-startup"],
+        # A counter that BUS_TYPE doesn't list is not published.
+        _Driver(health=(motor_status, {**_BUS, "new_counter": 12})),
+    )
+    assert [data for output_id, data, _ in outputs if output_id == "state"] == [
+        [
+            {
+                "qpos": [0.0] * 8,
+                "qvel": [0.0] * 8,
+                "qtorque": [0.0] * 8,
+                "tmos": [0] * 8,
+                "trotor": [0] * 8,
+                "motor_status": motor_status,
+                "bus": _BUS,
+            }
+        ]
     ]
